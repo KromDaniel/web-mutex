@@ -2,26 +2,34 @@
  * RUN WITH node --experimental-worker basic.example.js
  * OR npm run example:basic
  * 
- * This program initializes with the size of ARR_SIZE, where index 0 represents the number 2
- * and let worker threads calculate for each cell of the array
- * if the index +2 is prime, store the prime number else store -1
+ * This program initializes array with the size of ARR_SIZE, where index 0 represents the number 2.
+ * each worker threads calculates for each cell of the array:
+ *   if the index +2 is prime, store the prime number else store -1
  * 
  * example array with size of 5 will eventually be
- * INDEX  0   1   2   3   4
- * ARRAY  [2, 3, -1 , 5, -1] // 4 and 6 are not primes
- * NUMBER  2  3   4   5   6 
+ * INDEX   0   1   2   3   4
+ * ARRAY   2   3  -1   5  -1 // 4 and 6 are not primes
+ * NUMBER  2   3   4   5   6 
  * 
- * The final output for this program
- * SINGLE THREAD: 29094.859ms
- * thread number 4 done
- * thread number 3 done
- * thread number 2 done
- * thread number 1 done
- * MULTI THREAD: 2058.209ms
+ * The final output of this program
+ * output changes each run :)
+ * 
+ * [main] run in main thread and measure time
+ * SINGLE THREAD: 28709.764ms
+ * [main] run in multi thread and measure time
+ * [w1] Begin
+ * [w2] Begin
+ * [w3] Begin
+ * [w4] Begin
+ * [w3] Done
+ * [w1] Done
+ * [w2] Done
+ * [w4] Done
+ * MULTI THREAD: 1978.282ms
  */
 const { Worker, isMainThread, parentPort, threadId } = require('worker_threads');
 const { SyncedValue } = require('web-mutex');
-
+const log = require('./threadLogger');
 
 const ARR_SIZE = 2 ** 25;
 /**
@@ -43,6 +51,7 @@ if (isMainThread) {
      */
     const singleThreadedArr = Array(ARR_SIZE);
     function doInSingleThreaded() {
+        log('run in main thread and measure time');
         console.time('SINGLE THREAD');
         for (let i = 0; i < ARR_SIZE; i++) {
             const num = i + 2;
@@ -63,6 +72,7 @@ if (isMainThread) {
      * the second array store the prime | -1 numbers
      */
     // shared array buffer for locks
+    log('run in multi thread and measure time');
     const synced = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
     const numbers = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * ARR_SIZE);
     // create the threads
@@ -88,13 +98,14 @@ if (isMainThread) {
 } else {
     // this scope represents run of a worker thread
     parentPort.on('message', ({ numbers, synced }) => {
+        log('Begin');
         const syncedValue = new SyncedValue(new Int32Array(synced), 0);
         const arr = new Int32Array(numbers);
         for (let i = syncedValue.incrementOne(); i < arr.length; i = syncedValue.incrementOne()) {
             const num = arr[i] + 2;
             arr.set([isPrime(num) ? num : -1], i);
         }
-        console.log("thread number", threadId, "done");
+        log('Done');
         parentPort.close();
     });
 }

@@ -1,0 +1,44 @@
+{
+  "name": "web-mutex",
+  "version": "1.0.0",
+  "description": "Web worker and worker thread mutex implementation",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "jest",
+    "lint": "tslint -p ./"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KromDaniel/web-mutex.git"
+  },
+  "keywords": [
+    "mutex",
+    "web-worker",
+    "worker-threads",
+    "threads",
+    "atomics",
+    "mutex",
+    "lock",
+    "read-writer"
+  ],
+  "author": "Daniel Krom",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/KromDaniel/web-mutex/issues"
+  },
+  "homepage": "https://github.com/KromDaniel/web-mutex#readme",
+  "devDependencies": {
+    "@types/jest": "^23.3.10",
+    "husky": "^1.3.0",
+    "jest": "^23.6.0",
+    "ts-jest": "^23.10.5",
+    "tslint": "^5.12.0",
+    "typescript": "^3.2.2"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "npm test",
+      "pre-push": "npm test && npm run lint"
+    }
+  }
+}
