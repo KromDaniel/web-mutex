@@ -28,7 +28,7 @@
  * MULTI THREAD: 1978.282ms
  */
 const { Worker, isMainThread, parentPort, threadId } = require('worker_threads');
-const { SyncedValue } = require('web-mutex');
+const { SyncedValue } = require('../../dist/');
 const log = require('./threadLogger');
 
 const ARR_SIZE = 2 ** 25;

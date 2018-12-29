@@ -4,37 +4,76 @@
  * 
  * This file should not run as main thread
  */
-const { parentPort, threadId, MessagePort } = require('worker_threads');
-const { NotifiedValue, Mutex, SyncedValue } = require('web-mutex');
+const { parentPort, threadId, MessagePort, workerData } = require('worker_threads');
 const { writeSync, readSync, openSync, closeSync, unlinkSync } = require('fs');
-const myFd = openSync('./queue.txt', 'w+');
 
+const { NotifiedValue, Mutex, SyncedValue } = require('../../');
+const {
+    OPEN_FILE_ONCE_MUTEX_IDX,
+    OPEN_FILE_ONCE_SYNCED_FLAG_IDX,
+    QUEUE_FILE_DESCRIPTOR_IDX,
+    QUEUE_MUTEX_ID,
+    QUEUE_BYTE_SIZE_IDX,
+    ROW_LENGTH
+} = require("./mutex.example.consts");
 const log = require('./threadLogger');
+
 /**
- * @type {number}
+ * @type {Mutex}
  */
-let fileDescriptor;
+let openFileOnceMutex;
+
 /**
  * @type {SyncedValue}
  */
-let currentQueueByteSize;
+let openFileOnceFlag;
+
+/**
+ * @type {SyncedValue}
+ */
+let queueFileDescriptor;
+
 /**
  * @type {Mutex}
  */
 let queueMutex;
 
+/**
+ * @type {SyncedValue}
+ */
+let queueByteSize;
 
+/**
+ * @param {Int32Array} sharedMemory
+ * 
+ * @description init both consumer
+ * and product
+ */
+function initAllWorkers(sharedMemory){
+    openFileOnceMutex = new Mutex(new NotifiedValue(sharedMemory, OPEN_FILE_ONCE_MUTEX_IDX));
+    openFileOnceFlag = new SyncedValue(sharedMemory, OPEN_FILE_ONCE_SYNCED_FLAG_IDX);
+    queueFileDescriptor = new SyncedValue(sharedMemory, QUEUE_FILE_DESCRIPTOR_IDX);
+    queueMutex = new Mutex(new NotifiedValue(sharedMemory, QUEUE_MUTEX_ID));
+    queueByteSize = new SyncedValue(sharedMemory, QUEUE_BYTE_SIZE_IDX);
+    Mutex.once(openFileOnceMutex, openFileOnceFlag, (done) => {
+        queueFileDescriptor.store(openSync('./queue.txt', 'w+'));
+        done();
+    });
+}
 /**
  * 
  * @param {SharedArrayBuffer} shm 
  * @param {MessagePort} port 
  */
 function init(shm, port) {
-    const shmArr = new Int32Array(shm);
-    fileDescriptor = myFd;
-    queueMutex = new Mutex(new NotifiedValue(shmArr, 1));
-    currentQueueByteSize = new SyncedValue(shmArr, 2);
-    port.on('message', produce);
+    initAllWorkers(new Int32Array(shm));
+    if(workerData === 'producer') {
+        port.on('message', produce);
+    }
+
+    if(workerData === 'consumer') {
+        
+    }
 }
 
 /**
@@ -46,30 +85,30 @@ function padEnd(str) {
 }
 
 function writeAt(offset, str) {
-    writeSync(fileDescriptor, str, offset);
-    currentQueueByteSize.increment(str.length);
+    writeSync(queueFileDescriptor.load(), str, offset);
+    queueByteSize.increment(str.length);
 }
 
 function pushForward(fromOffset) {
     const tempFile = openSync(`./${threadId}.tmp`, "w+");
-    const currentSize = currentQueueByteSize.load();
+    const currentSize = queueByteSize.load();
     let totalByte = 0;
     const currentBuff = Buffer.alloc(500);
     for (let i = fromOffset; i < currentSize; i += currentBuff.byteLength) {
-        const r = readSync(fileDescriptor, currentBuff, 0, currentBuff.byteLength, i);
+        const r = readSync(queueFileDescriptor.load(), currentBuff, 0, currentBuff.byteLength, i);
         writeSync(tempFile, currentBuff, 0, r, totalByte);
         totalByte += r;
         if (r < currentBuff.byteLength) {
             break;
         }
     }
-    writeSync(fileDescriptor, padEnd(''), fromOffset);
+    writeSync(queueFileDescriptor.load(), padEnd(''), fromOffset);
 
     // copy the rest
     let position = 0;
     while (true) {
         const r = readSync(tempFile, currentBuff, 0, currentBuff.byteLength, position);
-        writeSync(fileDescriptor, currentBuff, 0, r, fromOffset + ROW_LENGTH + position);
+        writeSync(queueFileDescriptor.load(), currentBuff, 0, r, fromOffset + ROW_LENGTH + position);
         position += r;
         if (r < currentBuff.byteLength) {
             break;
@@ -88,7 +127,7 @@ function produce({ priority, task }) {
     log(`Got produce, will lock! with priority=${priority}`);
     queueMutex.lock();
     try {
-        const currentSize = currentQueueByteSize.load();
+        const currentSize = queueByteSize.load();
         const taskStr = `${priority},${task}`;
         if (currentSize === 0) {
             writeAt(0, padEnd(taskStr));
@@ -96,7 +135,7 @@ function produce({ priority, task }) {
         }
         const buff = Buffer.alloc(ROW_LENGTH);
         for (let i = 0; i < currentSize; i += ROW_LENGTH) {
-            const read = readSync(fileDescriptor, buff, 0, ROW_LENGTH, i);
+            const read = readSync(queueFileDescriptor.load(), buff, 0, ROW_LENGTH, i);
             if (read === 0) {
                 log('Will produce at position 0');
                 writeAt(currentSize, padEnd(taskStr));

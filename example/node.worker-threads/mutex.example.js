@@ -38,10 +38,14 @@ const producer =  new Worker("./mutex.example.queue.worker.js", {
 
 
 const { port1, port2 } = new MessageChannel();
-consumer.postMessage({
+producer.postMessage({
     shm: sharedMemoryNeeded,
     port: port2,
 }, [port2]);
+
+consumer.postMessage({
+    shm: sharedMemoryNeeded,
+});
 
 (function enqueueJob(){
     port1.postMessage({
