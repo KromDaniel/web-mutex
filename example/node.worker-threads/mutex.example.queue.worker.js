@@ -5,8 +5,8 @@
  * This file should not run as main thread
  */
 const { parentPort, threadId, MessagePort, workerData } = require('worker_threads');
-const { writeSync, readSync, openSync, closeSync, unlinkSync } = require('fs');
-
+const { writeSync, readSync, openSync, closeSync, unlinkSync, ftruncateSync, readFileSync } = require('fs');
+const { promisify } = require('util');
 const { NotifiedValue, Mutex, SyncedValue } = require('../../');
 const {
     OPEN_FILE_ONCE_MUTEX_IDX,
@@ -16,6 +16,9 @@ const {
     QUEUE_BYTE_SIZE_IDX,
     ROW_LENGTH
 } = require("./mutex.example.consts");
+const setTimeoutAsync = promisify(setTimeout);
+const fakeConsumerDoSomething = () => setTimeoutAsync(Math.random() * 3000);
+
 const log = require('./threadLogger');
 
 /**
@@ -43,13 +46,14 @@ let queueMutex;
  */
 let queueByteSize;
 
+
 /**
  * @param {Int32Array} sharedMemory
  * 
  * @description init both consumer
  * and product
  */
-function initAllWorkers(sharedMemory){
+function initAllWorkers(sharedMemory) {
     openFileOnceMutex = new Mutex(new NotifiedValue(sharedMemory, OPEN_FILE_ONCE_MUTEX_IDX));
     openFileOnceFlag = new SyncedValue(sharedMemory, OPEN_FILE_ONCE_SYNCED_FLAG_IDX);
     queueFileDescriptor = new SyncedValue(sharedMemory, QUEUE_FILE_DESCRIPTOR_IDX);
@@ -67,14 +71,39 @@ function initAllWorkers(sharedMemory){
  */
 function init(shm, port) {
     initAllWorkers(new Int32Array(shm));
-    if(workerData === 'producer') {
+    if (workerData === 'producer') {
         port.on('message', produce);
     }
 
-    if(workerData === 'consumer') {
-        
+    if (workerData === 'consumer') {
+        consume();
     }
 }
+
+function dequeue() {
+    if (queueByteSize.load() === 0) {
+        return null;
+    }
+    try {
+        queueMutex.lock();
+        const line = truncateLastLine();
+        if (line !== null) {
+            log(`dequeued ${line}`);
+        }
+        return line;
+    } finally {
+        queueMutex.unlock();
+    }
+}
+async function consume() {
+    const task = dequeue();
+    if (task !== null) {
+        await fakeConsumerDoSomething();
+    }
+    setTimeout(consume, 0);
+}
+
+// ============== Producer =============== //
 
 /**
  * 
@@ -88,7 +117,13 @@ function writeAt(offset, str) {
     writeSync(queueFileDescriptor.load(), str, offset);
     queueByteSize.increment(str.length);
 }
-
+function truncateLastLine() {
+    const buff = Buffer.alloc(ROW_LENGTH);
+    readSync(queueFileDescriptor.load(), buff, 0, ROW_LENGTH, queueByteSize.load() - ROW_LENGTH);
+    ftruncateSync(queueFileDescriptor.load(), queueByteSize.load() - ROW_LENGTH);
+    queueByteSize.decrement(ROW_LENGTH);
+    return buff.toString();
+}
 function pushForward(fromOffset) {
     const tempFile = openSync(`./${threadId}.tmp`, "w+");
     const currentSize = queueByteSize.load();

@@ -6,9 +6,9 @@
  * the queue needs to be persistent, and the main thread doesn't want to 
  * use mutex since it can block the event loop.
  * 
- * The main thread creates 2 workers
+ * The main thread creates 4 workers
  * the first should write the task to the file at the relevant position (by priority)
- * the second should clean the queue, where the LAST row is the highest priority task.
+ * the 2,3,4 should clean the queue, where the LAST row is the highest priority task.
  * 10 is the highest priority, 0 is the lowest 
  * 
  * To make stuff simple, 
@@ -22,13 +22,21 @@
  * 
  */
 const { Worker, MessageChannel } = require('worker_threads');
-const { SHARED_MEMORY_LEN } = require('./mutex.example.consts');
-
+const { SHARED_MEMORY_LEN, TOTAL_MESSAGES } = require('./mutex.example.consts');
+const log = require('./threadLogger');
 
 // create shared memory
 const sharedMemoryNeeded = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * SHARED_MEMORY_LEN);
 
 const consumer = new Worker("./mutex.example.queue.worker.js", {
+    workerData: 'consumer',
+});
+
+const consumer2 = new Worker("./mutex.example.queue.worker.js", {
+    workerData: 'consumer',
+});
+
+const consumer3 = new Worker("./mutex.example.queue.worker.js", {
     workerData: 'consumer',
 });
 
@@ -47,11 +55,24 @@ consumer.postMessage({
     shm: sharedMemoryNeeded,
 });
 
+consumer2.postMessage({
+    shm: sharedMemoryNeeded,
+});
+
+consumer3.postMessage({
+    shm: sharedMemoryNeeded,
+});
+
+let currentMessage = 0;
+
 (function enqueueJob(){
     port1.postMessage({
         task: `${new Date().toISOString()}`,
         priority: Math.floor(Math.random() * 11),
     });
-
-    setTimeout(enqueueJob, Math.random() * 3000)
+    if(++currentMessage === TOTAL_MESSAGES) {
+        log('MAIN THREAD DONE ALL');
+        return;
+    }
+    setTimeout(enqueueJob, 50);
 })();
